@@ -1,0 +1,16 @@
+#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=32:mem=124gb
+#PBS -N LR
+
+module load anaconda3/personal
+source activate tensorflowML
+#module load cuda/8.0
+
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/linear_regression/linear_regression.py .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/linear_regression/functionsLR.py .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/psi1_DG_0_500K_100days_filtered_150PCs.dat .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/psi1_DG_0_500K_100days_filtered_150EOFs.nc .
+
+python3 linear_regression.py
+
+cp *.npy *.png $PBS_O_WORKDIR

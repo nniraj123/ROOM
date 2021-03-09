@@ -1,0 +1,15 @@
+#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=04:mem=24gb:ngpus=1:gpu_type=RTX6000
+#PBS -N LSTM
+
+module load anaconda3/personal
+source activate tf-gpu
+module load cuda/8.0
+
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/LSTM/LSTM.py .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/LSTM/functionsLSTM.py .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/psi1_DG_0_500K_100days_filtered_150PCs.dat .
+
+python3 LSTM.py
+
+cp *.png *.npy $PBS_O_WORKDIR

@@ -1,0 +1,16 @@
+#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=32:mem=124gb
+#PBS -N AdditiveRedNoise
+
+module load anaconda3/personal
+source activate tensorflowML
+#module load cuda/8.0
+
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/LR+AdditiveNoise/RedNoise/LR_AddRedNoise.py .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/LR+AdditiveNoise/functionsLR_AddNoise.py .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/psi1_DG_0_500K_100days_filtered_150PCs.dat .
+cp /rds/general/user/na517/home/WORK/code_DG/Modelling_of_PCs_n=150/psi1_DG_0_500K_100days_filtered_150EOFs.nc .
+
+python3 LR_AddRedNoise.py
+
+cp *.npy *.png $PBS_O_WORKDIR
