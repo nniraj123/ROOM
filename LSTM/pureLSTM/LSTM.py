@@ -15,7 +15,7 @@ from tqdm import tqdm
 # np.random.seed(42)
 
 print('Number of cores:',multiprocessing.cpu_count())
-num_cores = 24
+num_cores = 12
 
 # Define other parameters of the problem
 n_pc = 150         # number of PCs
@@ -41,8 +41,10 @@ fid = Dataset(eoffile,'r')
 eofs = fid.variables['EOFs'][:n_pc,:,:]
 eofs = eofs.reshape((n_pc, nx*ny))
 
+look_back = 10    # explicit memory included in the training data 
 n_train = n_maxtrain
-x_train, y_train, scaler = trainingdata(pcs, n_pc, n_train, 'standard')
+n_samples = n_train - look_back
+x_train, y_train, scaler = trainingdata(pcs, n_pc, n_train, look_back, 'standard')
 
 # Train the LSTM
 start = datetime.now()
@@ -56,8 +58,8 @@ model, history = fitLSTM(x_train, y_train, n_pc, **hyperparams)
 
 print('Training time:',datetime.now()-start)
 
-ypred_LSTM = np.zeros((n_train-1, n_pc))
-for k in range(n_train-1):
+ypred_LSTM = np.zeros((n_samples, n_pc))
+for k in range(n_samples):
     ypred_LSTM[k,:] = np.squeeze(model.predict(np.expand_dims(x_train[k,:,:], axis=0), batch_size=1))
 
 # compute LSTM residuals
@@ -66,16 +68,16 @@ residual = y_train - ypred_LSTM
 # Spatially correlated white noise
 def spatialCorrWhtNoise(nt, npc, residual):
     dW = np.random.randn(nt, npc) # additive white noise
-    covn = np.cov(residual.T) # Correlation coefficients
+    covn = np.corrcoef(residual.T) # Correlation coefficients
     rr = np.linalg.cholesky(covn)
     stdres = np.std(residual, axis=0)
     return dW.dot(rr.T)*stdres
-"""
+
 ################################################################
 ##################### Short term forecasts #####################
 ################################################################
-n_maxlead = 10  # Prediction of 20 records for each realization
-n_ic = int((n_test - n_maxlead))    # Number of initial conditions 
+n_maxlead = 10  # Prediction of 10 records for each realization
+n_ic = int((n_test - n_maxlead - look_back + 1))    # Number of initial conditions 
 n_ensem = 100
 y_pred = np.zeros([n_ic, n_ensem, n_maxlead, n_pc])
 isnoise = False
@@ -84,7 +86,7 @@ test_dataN = scaler.transform(test_data)
 start = datetime.now()
 for k in range(n_ic):
     # initial conditions
-    x_start = test_dataN[k,:].reshape(1,-1)
+    x_start = test_dataN[k:k+look_back,:]
     if isnoise:
         # generate the noise for all ensembles
         dW = spatialCorrWhtNoise(n_ensem*n_maxlead, n_pc, residual)
@@ -94,7 +96,7 @@ for k in range(n_ic):
     
     # produce forecasts
     y_pred[k,:,:,:] = forecast(n_maxlead,n_pc,x_start,dt,
-                               model,scaler,n_ensem,dW)
+                               model,scaler,n_ensem,look_back,dW)
 
 enMean_y_pred = np.mean(y_pred, axis=1)
 print('Prediction time:', datetime.now()-start)
@@ -112,20 +114,20 @@ rmse = np.zeros((n_ic, n_maxlead))
 start = datetime.now()
 # start a parallel pool and implement thread parallelism
 if __name__ == "__main__":
-    rmse = Parallel(n_jobs=num_cores, prefer="threads")(delayed(RMSE)(i,test_data,enMean_y_pred,eofs,n_maxlead) for i in tqdm(range(n_ic)))
+    rmse = Parallel(n_jobs=num_cores, prefer="threads")(delayed(RMSE)(i,test_data,enMean_y_pred,eofs,n_maxlead,look_back) for i in tqdm(range(n_ic)))
 
 meanRMSE = np.mean(rmse, axis=0)
-np.save('RMSE_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_nic=9990_ntrain=400K_ntest=100K',meanRMSE)
+np.save('RMSE_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=9990_ntrain=400K_ntest=100K',meanRMSE)
 
 # Plot the mean RMSE
-#plt.plot(np.arange(dt,n_maxlead*dt+1,dt),meanRMSE)
-#plt.xlabel('Time (in days)')
-#plt.ylabel('RMSE')
-#plt.ylim([10, 80])
-#plt.xlim([dt, n_maxlead*dt])
-#plt.grid(color='k', linestyle='--', linewidth=0.2)
-#plt.savefig('RMSE_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_nic=9990_ntrain=400K_ntest=100K.png',dpi=100)
-#plt.close()
+plt.plot(np.arange(dt,n_maxlead*dt+1,dt),meanRMSE)
+plt.xlabel('Time (in days)')
+plt.ylabel('RMSE')
+plt.ylim([10, 80])
+plt.xlim([dt, n_maxlead*dt])
+plt.grid(color='k', linestyle='--', linewidth=0.2)
+plt.savefig('RMSE_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=9990_ntrain=400K_ntest=100K.png',dpi=100)
+plt.close()
 
 ####################################################################
 # Metric 2a : Instantaneous temporal correlation coefficient (ITCC) #
@@ -134,7 +136,7 @@ itcc = np.zeros((n_ic, nx*ny))
 
 start = datetime.now()
 if __name__ == "__main__":
-    itcc = Parallel(n_jobs=num_cores, prefer="threads")(delayed(ICC_wrapper)(i,test_data,enMean_y_pred,eofs,n_maxlead,'temporal') for i in tqdm(range(n_ic)))
+    itcc = Parallel(n_jobs=num_cores, prefer="threads")(delayed(ICC_wrapper)(i,test_data,enMean_y_pred,eofs,n_maxlead,look_back,'temporal') for i in tqdm(range(n_ic)))
 
 print('Time taken:',datetime.now()-start)
 meanitcc = np.mean(itcc, axis=0)
@@ -142,9 +144,9 @@ meanitcc = np.mean(itcc, axis=0)
 plt.imshow(meanitcc.reshape(nx,ny), origin='lower',cmap='jet')
 plt.colorbar()
 plt.clim([0, 1])
-plt.savefig('ITCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_nic=9990_ntrain=400K_ntest=100K.png',dpi=100)
+plt.savefig('ITCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=9990_ntrain=400K_ntest=100K.png',dpi=100)
 plt.close()
-np.save('ITCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_nic=9990_ntrain=400K_ntest=100K',meanitcc)
+np.save('ITCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=9990_ntrain=400K_ntest=100K',meanitcc)
 
 ####################################################################
 # Metric 2b : Instantaneous spatial correlation coefficient (ISCC) #
@@ -153,7 +155,7 @@ iscc = np.zeros((n_ic, n_maxlead))
 
 start = datetime.now()
 if __name__ == "__main__":
-    iscc = Parallel(n_jobs=num_cores, prefer="threads")(delayed(ICC_wrapper)(i,test_data,enMean_y_pred,eofs,n_maxlead,'spatial') for i in tqdm(range(n_ic)))
+    iscc = Parallel(n_jobs=num_cores, prefer="threads")(delayed(ICC_wrapper)(i,test_data,enMean_y_pred,eofs,n_maxlead,look_back,'spatial') for i in tqdm(range(n_ic)))
 
 print('Time taken:',datetime.now()-start)
 meaniscc = np.mean(iscc, axis=0)
@@ -164,10 +166,10 @@ meaniscc = np.mean(iscc, axis=0)
 #plt.xlim([dt, n_maxlead*dt])
 #plt.ylim([0.7, 1])
 #plt.grid(color='k', linestyle='--', linewidth=0.2)
-#plt.savefig('ISCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_nic=9990_ntrain=400K_ntest=100K.png',dpi=100)
+#plt.savefig('ISCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=9990_ntrain=400K_ntest=100K.png',dpi=100)
 #plt.close()
-np.save('ISCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_nic=9990_ntrain=400K_ntest=100K',meaniscc)
-"""
+np.save('ISCC_Psi1_100days_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=9990_ntrain=400K_ntest=100K',meaniscc)
+
 ################################################################
 ################### Long term forecasts ########################
 ################################################################
@@ -181,7 +183,8 @@ test_dataN = scaler.transform(test_data)
 start = datetime.now()
 for k in range(n_ic):
     # initial conditions
-    x_start = test_dataN[k,:].reshape(1,-1)
+    x_start = test_dataN[k:k+look_back,:]
+    
     if isnoise:
         # generate the noise for all ensembles
         dW = spatialCorrWhtNoise(n_ensem*n_maxlead, n_pc, residual)
@@ -191,7 +194,7 @@ for k in range(n_ic):
     
     # produce forecasts
     y_pred[k,:,:,:] = forecast(n_maxlead,n_pc,x_start,dt,
-                               model,scaler,n_ensem,dW)
+                               model,scaler,n_ensem,look_back,dW)
 
 enMean_y_pred = np.mean(y_pred, axis=1)
 print('Prediction time:', datetime.now()-start)
@@ -228,21 +231,21 @@ del psi1_pred
 plt.imshow(mean_psi1_climatology_pred.reshape(nx,ny), origin='lower', cmap='RdBu')
 plt.clim(-20, 20)
 plt.colorbar()
-plt.savefig('Climatology_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_nic=1_ntrain=400K_ntest=100K.png',dpi=100)
+plt.savefig('Climatology_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=1_ntrain=400K_ntest=100K.png',dpi=100)
 plt.close()
-np.save('Climatology_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_nic=1_ntrain=400K_ntest=100K',mean_psi1_climatology_pred)
+np.save('Climatology_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=1_ntrain=400K_ntest=100K',mean_psi1_climatology_pred)
 
 plt.imshow(mean_psi1_variance_pred.reshape(nx,ny), origin='lower', cmap='jet')
 plt.clim(0, 100000)
 plt.colorbar()
-plt.savefig('Variance_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_nic=1_ntrain=400K_ntest=100K.png',dpi=100)
+plt.savefig('Variance_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=1_ntrain=400K_ntest=100K.png',dpi=100)
 plt.close()
-np.save('Variance_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_nic=1_ntrain=400K_ntest=100K',mean_psi1_variance_pred)
+np.save('Variance_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=1_ntrain=400K_ntest=100K',mean_psi1_variance_pred)
 
 # Frequency map of the predictions
 plt.imshow(np.array(mean_freq_pred).reshape(nx,ny), origin='lower', cmap='jet')
 plt.colorbar()
 plt.clim([0,4])
-plt.savefig('Frequency_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_nic=1_ntrain=400K_ntest=100K.png',dpi=100)
+plt.savefig('Frequency_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=1_ntrain=400K_ntest=100K.png',dpi=100)
 plt.close()
-np.save('Frequency_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_nic=1_ntrain=400K_ntest=100K',mean_freq_pred)
+np.save('Frequency_Psi1_200Kdays_predictions_pureLSTM_npc=150_norm=own_look_back=10_nic=1_ntrain=400K_ntest=100K',mean_freq_pred)

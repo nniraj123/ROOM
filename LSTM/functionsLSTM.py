@@ -35,7 +35,7 @@ def dlmread(fname, n_run, n_pc):
 
 #############################################################
 
-def trainingdata(data, n_pc, n_train, norm):
+def trainingdata(data, n_pc, n_train, look_back, norm):
     
     # Define the LSTM inputs/outputs
     # x_train shape: [samples, lag time_steps, features]
@@ -47,14 +47,17 @@ def trainingdata(data, n_pc, n_train, norm):
     train_data = data[:n_train, :]
     train_data, scaler = normalize(train_data, norm)
 
-    for i in range(1,n_train):
-        x_train.append(train_data[i-1:i,:])
-        y_train.append(train_data[i,:])
+    for i in range(n_train-look_back):
+        temp = train_data[i:(i+look_back), :]
+        x_train.append(temp)
+        y_train.append(train_data[i + look_back, :])
+        
+    return np.array(x_train), np.array(y_train), scaler
 
-    x_train, y_train = np.array(x_train), np.array(y_train)
-    
-    return x_train, y_train, scaler
-    
+#    for i in range(1,n_train):
+#        x_train.append(train_data[i-1:i,:])
+#        y_train.append(train_data[i,:])
+
 #######################################################################
 
 def normalize(data, norm):
@@ -125,23 +128,28 @@ def fitLSTM(x, y, n_pc,
 ###############################################################
 
 def forecast(n_pred, n_in_param, x_start, deltaT, lstm_model, 
-            scaler_x, n_ensem=1, dW=None):
+              scaler_x, n_ensem=1, look_back=1, dW=None):
     
     y_pred = np.zeros((n_ensem, n_pred, n_in_param))
     temp = np.zeros((n_pred, n_in_param))
     state = np.zeros((1, n_in_param))
+    x_in = np.zeros((look_back, n_in_param))
     
     for i in range(n_ensem):
         # Set the initial state
-        state = x_start
+        x_in = x_start.copy()
     
         for j in range(n_pred):
             # Use LSTM to predict the state
-            state = lstm_model.predict(np.expand_dims(state, axis=0), 
+            state = lstm_model.predict(np.expand_dims(x_in, axis=0), 
                                        batch_size=1) + dW[i*n_pred+j,:]
         
             # store the new state in the output
             temp[j,:] = state[:]
+            
+            # roll over x_in to include the new state
+            x_in[:-1,:] = x_in[1:,:]
+            x_in[-1,:] = state[:]
         
         y_pred[i,:,:] = scaler_x.inverse_transform(temp)
     
@@ -177,20 +185,20 @@ def ISCC(data1, data2):
 
 ################################################################
 
-def ICC_wrapper(k,y_true,y_pred,eofs,n_maxlead,mode):
-    psi1_true = y_true[k+1:k+n_maxlead+1,:].dot(eofs)
+def ICC_wrapper(k,y_true,y_pred,eofs,n_maxlead,look_back,mode):
+    psi1_true = y_true[k+look_back:k+n_maxlead+look_back,:].dot(eofs)
     psi1_pred = y_pred[k,:,:].dot(eofs)
     if mode == 'spatial':
         return ISCC(psi1_true, psi1_pred)
     elif mode == 'temporal':
         return ITCC(psi1_true, psi1_pred)
     else:
-        raise ValueError('mode value not recognised')
+        raise ValueError('mode not recognised')
         
 ################################################################
 
-def RMSE(k,y_true,y_pred,eofs,n_maxlead):
-    psi1_true = y_true[k+1:k+n_maxlead+1,:].dot(eofs)
+def RMSE(k,y_true,y_pred,eofs,n_maxlead,look_back):
+    psi1_true = y_true[k+look_back:k+look_back+n_maxlead,:].dot(eofs)
     psi1_pred = y_pred[k,:,:].dot(eofs)
     return np.sqrt(np.mean((psi1_true - psi1_pred)**2, axis=1))
 
