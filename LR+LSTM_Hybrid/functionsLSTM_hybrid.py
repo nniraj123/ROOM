@@ -161,8 +161,8 @@ def forecast_hybrid(n_pred, n_in_param, LR_icond, lstm_icond, deltaT, lstm_model
     
     for i in range(n_ensem):
         # Set the initial state
-        state = LR_icond
-        stateAndRes = lstm_icond
+        state = LR_icond.copy()
+        stateAndRes = lstm_icond.copy()
         
         # Set all out# variables to zero
         out0=0; out1=0; out2=0; out3=0
@@ -189,8 +189,9 @@ def forecast_hybrid(n_pred, n_in_param, LR_icond, lstm_icond, deltaT, lstm_model
             state = state + out0*deltaT
             # store the new state in the output
             temp[j,:] = state[:]
-            # update the LSTM input
-            stateAndRes = np.hstack([state, res_next])
+            # roll over LSTM_input to include the new state
+            stateAndRes[:-1,:] = stateAndRes[1:,:]
+            stateAndRes[-1,:] = np.hstack([state, res_next])
         
         y_pred[i,:,:] = scaler_x.inverse_transform(temp)
     
@@ -226,8 +227,8 @@ def ISCC(data1, data2):
 
 ################################################################
 
-def ICC_wrapper(k,y_true,y_pred,eofs,n_maxlead,mode):
-    psi1_true = y_true[k+2:k+n_maxlead+2,:].dot(eofs)
+def ICC_wrapper(k,y_true,y_pred,eofs,n_maxlead,look_back,mode):
+    psi1_true = y_true[k+look_back+1:k+n_maxlead+look_back+1,:].dot(eofs)
     psi1_pred = y_pred[k,:,:].dot(eofs)
     if mode == 'spatial':
         return ISCC(psi1_true, psi1_pred)
@@ -238,8 +239,8 @@ def ICC_wrapper(k,y_true,y_pred,eofs,n_maxlead,mode):
         
 ################################################################
 
-def RMSE(k,y_true,y_pred,eofs,n_maxlead):
-    psi1_true = y_true[k+2:k+n_maxlead+2,:].dot(eofs)
+def RMSE(k,y_true,y_pred,eofs,n_maxlead,look_back):
+    psi1_true = y_true[k+look_back+1:k+n_maxlead+look_back+1,:].dot(eofs)
     psi1_pred = y_pred[k,:,:].dot(eofs)
     return np.sqrt(np.mean((psi1_true - psi1_pred)**2, axis=1))
 
